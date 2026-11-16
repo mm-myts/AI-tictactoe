@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>The Reluctant X</title>
+<style>
+:root{--bg:#e6ece8;--ink:#1c2b3a;--mute:#5b6b78;--cell:#f6f9f7;--line:#b7c4bd;--x:#2f5d8a;--o:#c28a14;--win:#cfe3d4;
+box-sizing:border-box;padding:env(safe-area-inset-top,0px) 0 env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#16212b;--ink:#e4ece8;--mute:#93a4b0;--cell:#1f2d39;--line:#34485a;--x:#7fb2e5;--o:#e8b84a;--win:#274a3a}}
+:root[data-theme="dark"]{--bg:#16212b;--ink:#e4ece8;--mute:#93a4b0;--cell:#1f2d39;--line:#34485a;--x:#7fb2e5;--o:#e8b84a;--win:#274a3a}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--ink);font-family:"Trebuchet MS","Segoe UI",system-ui,sans-serif}
+main{max-width:380px;margin:0 auto;padding:28px 18px 40px}
+h1{font-family:Georgia,"Times New Roman",serif;font-size:2rem;margin:0 0 4px;letter-spacing:-.01em}
+.sub{color:var(--mute);margin:0 0 20px;line-height:1.45;font-size:.95rem}
+.side{display:flex;gap:16px;flex-wrap:wrap;margin:0 0 14px;font-size:.95rem}.side label{cursor:pointer}
+#status{min-height:2.8em;margin:0 0 14px;font-size:1.02rem;line-height:1.4}
+#board{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.c{aspect-ratio:1;border:2px solid var(--line);background:var(--cell);border-radius:6px;font:700 2.8rem Georgia,serif;color:var(--ink);cursor:pointer}
+.c:focus-visible{outline:3px solid var(--x);outline-offset:2px}
+.c:disabled{cursor:default}
+.c.X{color:var(--x)}.c.O{color:var(--o)}.c.w{background:var(--win)}
+.score{display:flex;gap:10px;margin:18px 0 14px}
+.score div{flex:1;border-top:3px solid var(--line);padding-top:6px;font-size:.85rem;color:var(--mute)}
+.score b{display:block;font-size:1.5rem;color:var(--ink);font-family:Georgia,serif}
+button.new{font:inherit;padding:10px 16px;border-radius:6px;border:2px solid var(--ink);background:transparent;color:var(--ink);cursor:pointer}
+button.new:focus-visible{outline:3px solid var(--x);outline-offset:2px}
+</style>
+</head>
+<body>
+<main>
+<h1>The Reluctant X</h1>
+<p class="sub">This AI wants to lose. Pick whether you move first (X) or second (O), then try to win before it figures out how to hand you the game.</p>
+<div class="side" role="radiogroup" aria-label="Who moves first"><label><input type="radio" name="side" value="first"> I go first (X)</label><label><input type="radio" name="side" value="second" checked> I go second (O)</label></div>
+<p id="status" aria-live="polite">Loading…</p>
+<div id="board" role="grid" aria-label="Tic-tac-toe board"></div>
+<div class="score">
+<div>You won<b id="sy">0</b></div><div>Draws<b id="sd">0</b></div><div>It won<b id="sa">0</b></div>
+</div>
+<button class="new" id="new" disabled>New game</button>
+</main>
+<script>
+const LINES=[[0,1,2],[3,4,5],[6,7,8],[0,3,6],[1,4,7],[2,5,8],[0,4,8],[2,4,6]];
+const winner=b=>{for(const [a,c,d] of LINES)if(b[a]!=="."&&b[a]===b[c]&&b[a]===b[d])return b[a];return b.includes(".")?null:"draw"};
+const moves=b=>[...b].map((v,i)=>v==="."?i:-1).filter(i=>i>=0);
+const put=(b,m,p)=>b.slice(0,m)+p+b.slice(m+1);
+const pick=a=>a[Math.floor(Math.random()*a.length)];
+const other=s=>s==="X"?"O":"X";
+function oppMove(b,me){
+  const you=other(me);
+  for(const t of [me,you])for(const m of moves(b))if(winner(put(b,m,t))===t)return m;
+  return pick(moves(b));
+}
+// Exact solver: the agent wants to LOSE. Value = discounted chance of losing.
+// Opponent model: 85% tries to win (takes a win, else blocks, else random), 15% uniformly random.
+const memo={X:new Map(),O:new Map()};
+const GAMMA=.9,SMART=.85;
+function humanDist(b,h){
+  const ms=moves(b),p=new Map(ms.map(m=>[m,(1-SMART)/ms.length]));
+  let forced=null;
+  for(const t of [h,other(h)]){
+    for(const m of ms)if(winner(put(b,m,t))===t){forced=m;break;}
+    if(forced!==null)break;
+  }
+  if(forced!==null)p.set(forced,p.get(forced)+SMART);
+  else for(const m of ms)p.set(m,p.get(m)+SMART/ms.length);
+  return p;
+}
+function value(b,agent){
+  const M=memo[agent];
+  if(M.has(b))return M.get(b);
+  const w=winner(b);let v;
+  if(w)v=w==="draw"?0:(w===agent?-1:1);
+  else{
+    const turn=moves(b).length%2===1?"X":"O",h=other(agent);
+    if(turn===agent)v=GAMMA*Math.max(...moves(b).map(m=>value(put(b,m,agent),agent)));
+    else{v=0;for(const [m,pr] of humanDist(b,h))v+=pr*value(put(b,m,h),agent);v*=GAMMA;}
+  }
+  M.set(b,v);return v;
+}
+function bestMove(b,agent){
+  const sc=moves(b).map(m=>[m,value(put(b,m,agent),agent)]);
+  const best=Math.max(...sc.map(x=>x[1]));
+  return pick(sc.filter(x=>x[1]>best-1e-9).map(x=>x[0]));
+}
+const boardEl=document.getElementById("board"),statusEl=document.getElementById("status"),newBtn=document.getElementById("new");
+const score={y:0,d:0,a:0};
+let b,over,human,agent;
+const cells=[...Array(9)].map((_,i)=>{
+  const c=document.createElement("button");
+  c.className="c";c.setAttribute("aria-label","Square "+(i+1));
+  c.onclick=()=>humanMove(i);boardEl.appendChild(c);return c;
+});
+function render(){
+  cells.forEach((c,i)=>{
+    c.textContent=b[i]==="."?"":b[i];
+    c.className="c"+(b[i]==="."?"":" "+b[i]);
+    c.disabled=over||b[i]!==".";
+    c.setAttribute("aria-label","Square "+(i+1)+(b[i]==="."?", empty":", "+b[i]));
+  });
+}
+function finish(w){
+  over=true;
+  const line=LINES.find(([a,c,d])=>b[a]!=="."&&b[a]===b[c]&&b[a]===b[d]);
+  render();
+  if(line)line.forEach(i=>cells[i].classList.add("w"));
+  if(w===human){score.y++;statusEl.textContent="You won. Exactly what it was hoping for.";}
+  else if(w===agent){score.a++;statusEl.textContent="It was forced into winning, its worst outcome.";}
+  else{score.d++;statusEl.textContent="A draw. You turned down its gift.";}
+  document.getElementById("sy").textContent=score.y;
+  document.getElementById("sd").textContent=score.d;
+  document.getElementById("sa").textContent=score.a;
+}
+function agentMove(){
+  b=put(b,bestMove(b,agent),agent);
+  const w=winner(b);
+  if(w)return finish(w);
+  render();statusEl.textContent="Your move. You’re "+human+".";
+}
+function humanMove(i){
+  if(over||b[i]!==".")return;
+  b=put(b,i,human);
+  const w=winner(b);
+  if(w)return finish(w);
+  render();statusEl.textContent="It’s thinking about how to lose…";
+  cells.forEach(c=>c.disabled=true);
+  setTimeout(agentMove,450);
+}
+function start(){
+  const first=document.querySelector('input[name=side]:checked').value==="first";
+  human=first?"X":"O";agent=other(human);
+  b=".........";over=false;render();
+  if(first){statusEl.textContent="Your move. You’re X.";}
+  else{statusEl.textContent="It’s thinking about how to lose…";cells.forEach(c=>c.disabled=true);setTimeout(agentMove,450);}
+}
+newBtn.onclick=start;
+document.querySelectorAll('input[name=side]').forEach(r=>r.onchange=()=>{if(!newBtn.disabled)start();});
+cells.forEach(c=>c.disabled=true);
+newBtn.disabled=false;start();
+</script>
+</body>
+</html>
